@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>STRAC算出ツール</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI','Meiryo',sans-serif;background:#f5f7fa;color:#333;padding:20px}
+h1{font-size:24px;color:#1a1a2e;margin-bottom:16px}
+#loading{background:#fff;padding:20px;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.1);margin-bottom:20px}
+#loading p{font-size:15px;color:#666}
+#loadStatus{font-size:13px;color:#27ae60;margin-top:8px;white-space:pre-line}
+#loadError{font-size:13px;color:#e74c3c;margin-top:8px;display:none}
+
+.tabs{display:none;margin-bottom:0}
+.tabs.show{display:flex}
+.tab{padding:10px 24px;font-size:15px;cursor:pointer;border:none;background:#ddd;color:#666;border-radius:8px 8px 0 0;margin-right:2px;font-weight:bold;transition:background .2s}
+.tab.active{background:#fff;color:#1a1a2e;box-shadow:0 -2px 4px rgba(0,0,0,.05)}
+.tab-content{display:none;background:#fff;padding:20px;border-radius:0 8px 8px 8px;box-shadow:0 1px 4px rgba(0,0,0,.1);margin-bottom:20px}
+.tab-content.active{display:block}
+
+.info{font-size:13px;color:#888;margin-bottom:14px}
+.summary{background:#f8f9fb;padding:14px 18px;border-radius:8px;margin-bottom:16px;font-size:14px;display:flex;gap:24px;align-items:center;flex-wrap:wrap}
+.summary b{color:#4a6fa5}
+.btn{background:#27ae60;color:#fff;border:none;padding:8px 20px;border-radius:6px;font-size:14px;cursor:pointer}
+.btn:hover{background:#1e8c4c}
+.btn-blue{background:#4a6fa5}
+.btn-blue:hover{background:#3a5f95}
+.btn-sm{padding:5px 12px;font-size:12px}
+.msg{color:#27ae60;font-size:13px;margin-left:10px;opacity:0;transition:opacity .3s}
+.msg.show{opacity:1}
+.table-wrap{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th{background:#1a1a2e;color:#fff;padding:8px 10px;text-align:center;white-space:nowrap;position:sticky;top:0;cursor:pointer;user-select:none}
+th:hover{background:#2a2a4e}
+th .sort-arrow{font-size:10px;margin-left:3px;opacity:.5}
+th.sorted .sort-arrow{opacity:1}
+td{padding:6px 10px;text-align:center;border-bottom:1px solid #eee;white-space:nowrap}
+tr:hover td{background:#f0f4ff}
+td.left{text-align:left}
+
+.product-controls{display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap}
+.product-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:8px}
+.product-item{display:flex;align-items:center;gap:8px;padding:8px 12px;background:#f8f9fb;border-radius:6px;font-size:13px;transition:opacity .2s}
+.product-item.excluded{opacity:.4;text-decoration:line-through}
+.product-item input[type="checkbox"]{width:16px;height:16px;cursor:pointer}
+.product-item .name{flex:1;font-weight:bold}
+.product-item .count{color:#888;font-size:12px}
+.pvm{font-size:12px;padding:2px 6px;border-radius:4px;font-weight:bold;white-space:nowrap}
+.pvm.p{color:#2980b9;background:#ebf5fb}
+.pvm.v{color:#c0392b;background:#fdedec}
+.pvm.m{color:#27ae60;background:#eafaf1}
+.excluded-count{font-size:13px;color:#e74c3c;font-weight:bold}
+.btn-csv{background:#4a6fa5;color:#fff;border:none;padding:3px 8px;border-radius:4px;font-size:11px;cursor:pointer;white-space:nowrap}
+.btn-csv:hover{background:#3a5f95}
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body>
+<h1>媒体別 STRAC算出ツール</h1>
+
+<div id="loading">
+  <p id="loadMsg">フォルダ内のファイルを自動読み込み中...</p>
+  <div id="loadStatus"></div>
+  <div id="loadError"></div>
+</div>
+
+<div class="tabs" id="tabs">
+  <button class="tab active" id="tabBtnResult">STRAC結果</button>
+  <button class="tab" id="tabBtnProducts">商品設定</button>
+</div>
+
+<div class="tab-content active" id="tab-result">
+  <div class="info" id="csvInfo"></div>
+  <div class="summary">
+    <div>媒体数: <b id="mediaCount"></b></div>
+    <div>総Q2: <b id="totalQ2"></b></div>
+    <div id="excludedInfo"></div>
+    <button class="btn" onclick="copyTSV()">クリップボードにコピー</button>
+    <span class="msg" id="msg">コピーしました！</span>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr id="thead"></tr></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+</div>
+
+<div class="tab-content" id="tab-products">
+  <div class="product-controls">
+    <input type="text" id="productFilter" placeholder="商品名で絞り込み..." style="padding:6px 12px;border:1px solid #ccc;border-radius:6px;font-size:14px;width:240px">
+    <button class="btn btn-blue btn-sm" id="btnFilterCheck">絞り込み結果を選択</button>
+    <button class="btn btn-blue btn-sm" id="btnFilterUncheck">絞り込み結果を解除</button>
+    <button class="btn btn-blue btn-sm" onclick="toggleAll(true)">すべて選択</button>
+    <button class="btn btn-blue btn-sm" onclick="toggleAll(false)">すべて解除</button>
+    <span id="productSummary" style="font-size:13px;color:#666"></span>
+  </div>
+  <div class="product-grid" id="productGrid"></div>
+  <div style="margin-top:16px">
+    <button class="btn" onclick="applyAndCalc()">この設定で再計算</button>
+  </div>
+</div>
+
+<textarea id="tsv" style="position:absolute;left:-9999px"></textarea>
+
+<script>
+var csvData = null;
+var masterData = null;
+var csvFileName = "";
+var excludedProducts = new Set();
+var allProductNames = [];
+var lastResults = [];
+var sortCol = -1;
+var sortAsc = false;
+var globalTeikiToMedia = {};
+
+function switchTab(name) {
+  document.querySelectorAll(".tab").forEach(function(t, i){
+    t.classList.toggle("active", (name === "result" && i === 0) || (name === "products" && i === 1));
+  });
+  document.getElementById("tab-result").classList.toggle("active", name === "result");
+  document.getElementById("tab-products").classList.toggle("active", name === "products");
+}
+
+async function autoLoad() {
+  var statusEl = document.getElementById("loadStatus");
+  var errorEl = document.getElementById("loadError");
+  var msgEl = document.getElementById("loadMsg");
+
+  try {
+    statusEl.textContent = "フォルダを検索中...";
+    var dirResp = await fetch("./");
+    var dirHtml = await dirResp.text();
+    var csvMatch = dirHtml.match(/href="([^"]*\.csv)"/gi);
+    if (!csvMatch || csvMatch.length === 0) {
+      throw new Error("CSVファイルが見つかりません。フォルダにCSVを入れてください。");
+    }
+    var csvFiles = csvMatch.map(function(m){ return m.replace(/href="/i,"").replace(/"$/,""); });
+
+    csvData = [];
+    var csvNames = [];
+    for (var ci = 0; ci < csvFiles.length; ci++) {
+      var csvFile = csvFiles[ci];
+      var name = decodeURIComponent(csvFile);
+      csvNames.push(name);
+      statusEl.textContent = "CSV読み込み中 (" + (ci+1) + "/" + csvFiles.length + "): " + name;
+      var csvResp = await fetch("./" + csvFile);
+      var csvBuf = new Uint8Array(await csvResp.arrayBuffer());
+      var csvText = decodeCSV(csvBuf);
+      var rows = parseCSV(csvText);
+      csvData = csvData.concat(rows);
+    }
+    csvFileName = csvNames.length === 1 ? csvNames[0] : csvNames.length + "ファイル結合（" + csvNames.join(", ") + "）";
+    statusEl.textContent = "CSV: " + csvData.length + " 行を読み込み（" + csvFiles.length + "ファイル）";
+
+    statusEl.textContent += "\n原価マスタ読み込み中...";
+    var masterResp = await fetch("./" + encodeURIComponent("原価マスタ.xlsx"));
+    if (!masterResp.ok) throw new Error("原価マスタ.xlsx が見つかりません。");
+    var masterBuf = new Uint8Array(await masterResp.arrayBuffer());
+    var wb = XLSX.read(masterBuf, {type: "array"});
+    var ws = wb.Sheets[wb.SheetNames[0]];
+    var rows = XLSX.utils.sheet_to_json(ws, {defval: ""});
+    masterData = [];
+    rows.forEach(function(r) {
+      var code = String(r["商品コード"] || "").trim();
+      if (!code) return;
+      var bags = parseInt(r["個数"]) || 1;
+      var omatome = r["おまとめ計算"];
+      var name = String(r["商品名"] || "");
+      var cost = parseFloat(r["原価"]) || 0;
+      masterData.push({code: code, bags: bags, isUpsell: omatome == 1, name: name, cost: cost});
+    });
+
+    buildProductList();
+    runCalc();
+    document.getElementById("loading").style.display = "none";
+    document.getElementById("tabs").classList.add("show");
+
+  } catch(e) {
+    msgEl.textContent = "自動読み込みに失敗しました";
+    errorEl.style.display = "block";
+    errorEl.textContent = e.message;
+  }
+}
+
+function isValidProduct(name) {
+  return /\d+$/.test(name.trim());
+}
+
+function isDefaultProduct(name) {
+  if (name.indexOf("サービス") >= 0) return false;
+  if (name.indexOf("都度") >= 0) return false;
+  if (name.indexOf("【極】") >= 0) return false;
+  if (name.indexOf("【一緒にお特便】") >= 0) return false;
+  if (name.indexOf("アサイベリープラチナアイ") >= 0) return true;
+  if (name.indexOf("きんいん") >= 0 && name.indexOf("きんいん極") < 0) return true;
+  if (name.indexOf("豆美膳") >= 0) return true;
+  if (name.indexOf("歩クミン") >= 0) return true;
+  return false;
+}
+
+function buildProductList() {
+  var nameCount = {};
+  csvData.forEach(function(row) {
+    var name = (row["購入商品（商品名）"] || "").trim();
+    if (!name || !isValidProduct(name)) return;
+    nameCount[name] = (nameCount[name] || 0) + 1;
+  });
+
+  allProductNames = Object.keys(nameCount).sort(function(a, b) {
+    return nameCount[b] - nameCount[a];
+  });
+
+  excludedProducts.clear();
+  allProductNames.forEach(function(name) {
+    if (!isDefaultProduct(name)) excludedProducts.add(name);
+  });
+
+  var grid = document.getElementById("productGrid");
+  var html = "";
+  allProductNames.forEach(function(name) {
+    var checked = !excludedProducts.has(name) ? "checked" : "";
+    html += '<label class="product-item' + (excludedProducts.has(name) ? ' excluded' : '') + '">'
+      + '<input type="checkbox" ' + checked + ' onchange="toggleProduct(this, \'' + name.replace(/'/g, "\\'") + '\')">'
+      + '<span class="name">' + name + '</span>'
+      + '<span class="count">' + nameCount[name] + '件</span>'
+      + '</label>';
+  });
+  grid.innerHTML = html;
+  updateProductSummary();
+}
+
+function toggleProduct(cb, name) {
+  if (cb.checked) {
+    excludedProducts.delete(name);
+    cb.closest(".product-item").classList.remove("excluded");
+  } else {
+    excludedProducts.add(name);
+    cb.closest(".product-item").classList.add("excluded");
+  }
+  updateProductSummary();
+}
+
+function toggleAll(checked) {
+  excludedProducts.clear();
+  if (!checked) {
+    allProductNames.forEach(function(n) { excludedProducts.add(n); });
+  }
+  document.querySelectorAll("#productGrid input[type='checkbox']").forEach(function(cb) {
+    cb.checked = checked;
+    cb.closest(".product-item").classList.toggle("excluded", !checked);
+  });
+  updateProductSummary();
+}
+
+function updateProductSummary() {
+  var total = allProductNames.length;
+  var excluded = excludedProducts.size;
+  document.getElementById("productSummary").textContent =
+    total + "商品中 " + (total - excluded) + "商品を選択中" + (excluded > 0 ? "（" + excluded + "商品を除外）" : "");
+}
+
+function applyAndCalc() {
+  runCalc();
+  switchTab("result");
+}
+
+document.getElementById("tabBtnResult").addEventListener("click", function(){ switchTab("result"); });
+document.getElementById("tabBtnProducts").addEventListener("click", function(){ switchTab("products"); });
+
+document.getElementById("productFilter").addEventListener("input", function() {
+  var q = this.value.trim().toLowerCase();
+  document.querySelectorAll("#productGrid .product-item").forEach(function(el) {
+    var name = el.querySelector(".name").textContent.toLowerCase();
+    el.style.display = (!q || name.indexOf(q) >= 0) ? "" : "none";
+  });
+});
+
+document.getElementById("btnFilterCheck").addEventListener("click", function() {
+  document.querySelectorAll("#productGrid .product-item").forEach(function(el) {
+    if (el.style.display === "none") return;
+    var cb = el.querySelector("input[type='checkbox']");
+    var name = el.querySelector(".name").textContent;
+    cb.checked = true;
+    excludedProducts.delete(name);
+    el.classList.remove("excluded");
+  });
+  updateProductSummary();
+});
+
+document.getElementById("btnFilterUncheck").addEventListener("click", function() {
+  document.querySelectorAll("#productGrid .product-item").forEach(function(el) {
+    if (el.style.display === "none") return;
+    var cb = el.querySelector("input[type='checkbox']");
+    var name = el.querySelector(".name").textContent;
+    cb.checked = false;
+    excludedProducts.add(name);
+    el.classList.add("excluded");
+  });
+  updateProductSummary();
+});
+
+autoLoad();
+
+function decodeCSV(buf) {
+  var encs = ["shift_jis", "utf-8"];
+  for (var i = 0; i < encs.length; i++) {
+    try {
+      var text = new TextDecoder(encs[i], {fatal: true}).decode(buf);
+      if (text.indexOf("定期") >= 0) return text;
+    } catch(e) {}
+  }
+  return new TextDecoder("shift_jis").decode(buf);
+}
+
+function parseCSV(text) {
+  var lines = text.split(/\r?\n/);
+  if (lines.length < 2) return [];
+  var headers = parseLine(lines[0]);
+  var rows = [];
+  for (var i = 1; i < lines.length; i++) {
+    var vals = parseLine(lines[i]);
+    if (vals.length < 5) continue;
+    var row = {};
+    for (var k = 0; k < headers.length && k < vals.length; k++) {
+      row[headers[k]] = vals[k].trim();
+    }
+    rows.push(row);
+  }
+  return rows;
+}
+
+function parseLine(line) {
+  var vals = [];
+  var cur = "", inQ = false;
+  for (var j = 0; j < line.length; j++) {
+    var c = line[j];
+    if (c === '"' && !inQ) { inQ = true; }
+    else if (c === '"' && inQ) {
+      if (j + 1 < line.length && line[j+1] === '"') { cur += '"'; j++; }
+      else { inQ = false; }
+    } else if (c === ',' && !inQ) { vals.push(cur); cur = ""; }
+    else { cur += c; }
+  }
+  vals.push(cur);
+  return vals;
+}
+
+function runCalc() {
+  var productMap = {};
+  masterData.forEach(function(p) {
+    productMap[p.code] = p;
+  });
+
+  var teikiToMedia = {};
+  var teikiN = {};
+  var excludedTeikis = new Set();
+
+  csvData.forEach(function(row) {
+    var nStr = (row["定期内受注（N番目）"] || "").trim();
+    var teiki = (row["定期受注番号"] || "").trim();
+    var media = (row["広告URLグループ名"] || "").trim();
+    var code = (row["購入商品（商品コード）"] || "").trim();
+    var productName = (row["購入商品（商品名）"] || "").trim();
+    var subtotal = parseFloat(row["小計"] || "0") || 0;
+    var n = parseInt(nStr);
+    if (isNaN(n) || !teiki) return;
+    if (!isValidProduct(productName)) return;
+    if (n === 1 && excludedProducts.has(productName)) {
+      excludedTeikis.add(teiki);
+      return;
+    }
+    if (excludedTeikis.has(teiki)) return;
+    if (n === 1 && media) teikiToMedia[teiki] = media;
+    if (!teikiN[teiki]) teikiN[teiki] = {};
+    if (!teikiN[teiki][n]) teikiN[teiki][n] = {codes: [], subtotal: 0};
+    teikiN[teiki][n].codes.push(code);
+    teikiN[teiki][n].subtotal += subtotal;
+  });
+
+  globalTeikiToMedia = teikiToMedia;
+
+  var mediaStats = {};
+  for (var teiki in teikiN) {
+    if (excludedTeikis.has(teiki)) continue;
+    var media = teikiToMedia[teiki];
+    if (!media) continue;
+    if (!mediaStats[media]) {
+      mediaStats[media] = {q1: 0, q2: 0, upsellCount: 0, totalCost: 0, nCounts: {}, nRevenue: {}, nCost: {}, productName: ""};
+    }
+    var ms = mediaStats[media];
+    for (var nStr in teikiN[teiki]) {
+      var n = parseInt(nStr);
+      var data = teikiN[teiki][n];
+      if (!ms.nCounts[n]) ms.nCounts[n] = new Set();
+      ms.nCounts[n].add(teiki);
+      ms.nRevenue[n] = (ms.nRevenue[n] || 0) + data.subtotal;
+      var nCost = 0;
+      data.codes.forEach(function(c) {
+        var prod = productMap[c];
+        if (prod) nCost += prod.cost || 0;
+      });
+      ms.nCost[n] = (ms.nCost[n] || 0) + nCost;
+      if (n === 1) {
+        var totalBags = 0, hasUpsell = false;
+        data.codes.forEach(function(c) {
+          var prod = productMap[c];
+          if (prod) {
+            totalBags += prod.bags;
+            if (prod.isUpsell) hasUpsell = true;
+            if (!ms.productName) ms.productName = prod.name;
+          } else {
+            totalBags += 1;
+          }
+        });
+        ms.q1 += totalBags;
+        ms.q2 += 1;
+        ms.totalCost += nCost;
+        if (hasUpsell) ms.upsellCount += 1;
+      }
+    }
+  }
+
+  var results = [];
+  for (var m in mediaStats) {
+    var ms2 = mediaStats[m];
+    if (ms2.q2 === 0) continue;
+    var upsellRate = ms2.upsellCount / ms2.q2;
+    var rates = [];
+    for (var i = 1; i <= 12; i++) {
+      var s = ms2.nCounts[i];
+      rates.push(s ? s.size / ms2.q2 : null);
+    }
+    var rev6 = 0, rev12 = 0, cost6 = 0, cost12 = 0;
+    for (var nn = 1; nn <= 6; nn++) { rev6 += ms2.nRevenue[nn] || 0; cost6 += ms2.nCost[nn] || 0; }
+    for (var nn2 = 1; nn2 <= 12; nn2++) { rev12 += ms2.nRevenue[nn2] || 0; cost12 += ms2.nCost[nn2] || 0; }
+    var pVal = Math.round((ms2.nRevenue[1] || 0) / ms2.q2);
+    var vVal = Math.round(ms2.totalCost / ms2.q2);
+    results.push({
+      media: m, product: ms2.productName, q1: ms2.q1, q2: ms2.q2,
+      p: pVal, v: vVal, m: pVal - vVal,
+      upsellQ: ms2.upsellCount, upsellRate: upsellRate, rates: rates,
+      ltv6: Math.round((rev6 - cost6) / ms2.q2), ltv12: Math.round((rev12 - cost12) / ms2.q2)
+    });
+  }
+  results.sort(function(a, b) { return b.q2 - a.q2; });
+  renderResults(results);
+}
+
+function pct(v) { return v == null ? "" : (v * 100).toFixed(1) + "%"; }
+
+var resultHeaders = ["","広告URLグループ","商品名","P（単価）","V（原価）","M（粗利）","Q1（袋数）","Q2（件数）","アップセルQ","アップセル率",
+  "F1","F2","F3","F4","F5","F6","F7","F8","F9","F10","F11","F12","半年LTV（粗利）","一年LTV（粗利）"];
+
+function getRowValues(r) {
+  var vals = ["", r.media, r.product, r.p, r.v, r.m, r.q1, r.q2, r.upsellQ, r.upsellRate];
+  r.rates.forEach(function(v){ vals.push(v); });
+  vals.push(r.ltv6, r.ltv12);
+  return vals;
+}
+
+function sortResults(colIdx) {
+  if (colIdx === 0) return;
+  if (sortCol === colIdx) { sortAsc = !sortAsc; }
+  else { sortCol = colIdx; sortAsc = (colIdx <= 2); }
+  lastResults.sort(function(a, b) {
+    var av = getRowValues(a)[colIdx];
+    var bv = getRowValues(b)[colIdx];
+    if (av == null) av = -Infinity;
+    if (bv == null) bv = -Infinity;
+    if (typeof av === "string") return sortAsc ? av.localeCompare(bv) : bv.localeCompare(av);
+    return sortAsc ? av - bv : bv - av;
+  });
+  renderTable();
+}
+
+function renderResults(results) {
+  lastResults = results;
+  sortCol = -1;
+  document.getElementById("csvInfo").textContent = "ソース: " + csvFileName;
+  document.getElementById("mediaCount").textContent = results.length;
+  var tq2 = 0;
+  results.forEach(function(x){ tq2 += x.q2; });
+  document.getElementById("totalQ2").textContent = tq2;
+
+  var ei = document.getElementById("excludedInfo");
+  if (excludedProducts.size > 0) {
+    ei.innerHTML = '<span class="excluded-count">' + excludedProducts.size + '商品を除外中</span>';
+  } else {
+    ei.innerHTML = '';
+  }
+  renderTable();
+}
+
+function renderTable() {
+  var thead = document.getElementById("thead");
+  thead.innerHTML = resultHeaders.map(function(h, i){
+    if (i === 0) return '<th style="cursor:default"></th>';
+    var cls = (i === sortCol) ? ' class="sorted"' : '';
+    var arrow = (i === sortCol) ? (sortAsc ? "▲" : "▼") : "▼";
+    return '<th' + cls + ' onclick="sortResults(' + i + ')">' + h + '<span class="sort-arrow">' + arrow + '</span></th>';
+  }).join("");
+
+  var tbodyHtml = "";
+  lastResults.forEach(function(r) {
+    var safeMedia = r.media.replace(/'/g, "\\'");
+    var row = '<td><button class="btn-csv" onclick="exportMediaCSV(\'' + safeMedia + '\')">CSV</button></td>';
+    row += '<td class="left">' + r.media + '</td><td class="left">' + r.product + '</td>';
+    row += "<td>" + r.p.toLocaleString() + "</td><td>" + r.v.toLocaleString() + "</td><td>" + r.m.toLocaleString() + "</td>";
+    row += "<td>" + r.q1 + "</td><td>" + r.q2 + "</td><td>" + r.upsellQ + "</td><td>" + pct(r.upsellRate) + "</td>";
+    r.rates.forEach(function(v){ row += "<td>" + pct(v) + "</td>"; });
+    row += "<td>" + r.ltv6 + "</td><td>" + r.ltv12 + "</td>";
+    tbodyHtml += "<tr>" + row + "</tr>";
+  });
+  document.getElementById("tbody").innerHTML = tbodyHtml;
+
+  var tsvHeaders = resultHeaders.slice(1);
+  var tsvLines = [tsvHeaders.join("\t")];
+  lastResults.forEach(function(r) {
+    var row = [r.media, r.product, r.p, r.v, r.m, r.q1, r.q2, r.upsellQ, pct(r.upsellRate)];
+    r.rates.forEach(function(v){ row.push(pct(v)); });
+    row.push(r.ltv6, r.ltv12);
+    tsvLines.push(row.join("\t"));
+  });
+  document.getElementById("tsv").value = tsvLines.join("\n");
+}
+
+function exportMediaCSV(media) {
+  var teikis = new Set();
+  for (var t in globalTeikiToMedia) {
+    if (globalTeikiToMedia[t] === media) teikis.add(t);
+  }
+  if (teikis.size === 0) { alert("データが見つかりません"); return; }
+
+  var filtered = csvData.filter(function(row) {
+    return teikis.has((row["定期受注番号"] || "").trim());
+  });
+
+  var headers = Object.keys(csvData[0]);
+  var csvContent = "﻿" + headers.map(function(h){ return '"' + h.replace(/"/g, '""') + '"'; }).join(",") + "\n";
+  filtered.forEach(function(row) {
+    csvContent += headers.map(function(h){ var v = row[h] || ""; return '"' + v.replace(/"/g, '""') + '"'; }).join(",") + "\n";
+  });
+
+  var blob = new Blob([csvContent], {type: "text/csv;charset=utf-8"});
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement("a");
+  a.href = url;
+  a.download = media.replace(/[\\/:*?"<>|]/g, "_") + ".csv";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function copyTSV() {
+  var ta = document.getElementById("tsv");
+  ta.style.position = "static";
+  ta.select();
+  document.execCommand("copy");
+  ta.style.position = "absolute";
+  var m = document.getElementById("msg");
+  m.classList.add("show");
+  setTimeout(function(){ m.classList.remove("show"); }, 2000);
+}
+</script>
+</body>
+</html>
